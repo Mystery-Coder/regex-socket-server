@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -37,15 +39,6 @@ type PlayerConnectIdentify struct {
 }
 
 func wsConnectPlayer(ctx *gin.Context) {
-
-	// var playerConnectIdentify PlayerConnectIdentify
-	// if err := ctx.BindJSON(&playerConnectIdentify); err != nil {
-	// 	fmt.Println("Bind Error", err)
-	// 	ctx.JSON(500, gin.H{"error": "BindError"})
-	// 	return
-	// }
-	// playerID := playerConnectIdentify.PlayerID
-	// roomID := playerConnectIdentify.RoomID
 
 	playerID := ctx.Query("PlayerID")
 	roomID := ctx.Query("RoomID")
@@ -83,12 +76,19 @@ func wsConnectPlayer(ctx *gin.Context) {
 		ctx.JSON(500, gin.H{"error": "WebSocketUpgradeError"})
 		return
 	}
+	defer conn.Close()
 
 	room.Players = append(room.Players, Player{PlayerID: playerID, Connection: conn})
 
 	for {
 		if len(room.Players) != 2 {
+			time.Sleep(time.Second * 2)
 			conn.WriteMessage(websocket.TextMessage, []byte("waiting..."))
+		} else {
+			for _, player := range room.Players {
+				player.Connection.WriteMessage(websocket.TextMessage, []byte("2 Players connected"))
+			}
+			return
 		}
 	}
 
@@ -98,6 +98,14 @@ var rooms map[string]*Room
 
 func main() {
 	router := gin.Default()
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+	}))
+
 	rooms = make(map[string]*Room)
 
 	router.GET("/connect_player", wsConnectPlayer)
