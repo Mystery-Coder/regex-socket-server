@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -38,60 +37,78 @@ type PlayerConnectIdentify struct {
 	PlayerID string
 }
 
-func wsConnectPlayer(ctx *gin.Context) {
+func broadcastRoomStatus(room *Room) {
+	msg := "waiting..."
+	if len(room.Players) == 2 {
+		msg = "2 Players connected"
+	}
 
+	for _, p := range room.Players {
+		if p.Connection != nil {
+			p.Connection.WriteMessage(websocket.TextMessage, []byte(msg))
+		}
+	}
+}
+
+func removePlayer(room *Room, playerID string) {
+	newPlayers := []Player{}
+	for _, p := range room.Players {
+		if p.PlayerID != playerID {
+			newPlayers = append(newPlayers, p)
+		}
+	}
+	room.Players = newPlayers
+}
+
+func wsConnectPlayer(ctx *gin.Context) {
 	playerID := ctx.Query("PlayerID")
 	roomID := ctx.Query("RoomID")
 
-	if playerID == "" {
-		fmt.Println("Missing PlayerID")
-		ctx.JSON(400, gin.H{"error": "PlayerIDMissingError"})
-		return
-	}
-
-	if roomID == "" {
-		fmt.Println("Missing RoomID")
-		ctx.JSON(400, gin.H{"error": "RoomIDMissingError"})
+	if playerID == "" || roomID == "" {
+		ctx.JSON(400, gin.H{"error": "Missing IDs"})
 		return
 	}
 
 	room, exists := rooms[roomID]
 	if !exists {
-		fmt.Println("Invalid RoomID")
-		ctx.JSON(400, gin.H{"error": "InvalidRoomIDError"})
+		ctx.JSON(400, gin.H{"error": "InvalidRoomID"})
 		return
 	}
 
 	if !slices.Contains(room.PlayerIDs, playerID) {
-		fmt.Println("Player not added")
-		ctx.JSON(400, gin.H{"error": "PlayerNotAddedError"})
+		ctx.JSON(400, gin.H{"error": "PlayerNotAdded"})
 		return
 	}
 
-	//Upgrade to WS
-
+	// Upgrade to WebSocket
 	conn, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
 	if err != nil {
-		fmt.Println("Upgrade Error")
-		ctx.JSON(500, gin.H{"error": "WebSocketUpgradeError"})
+		fmt.Println("Upgrade Error:", err)
 		return
 	}
-	defer conn.Close()
 
-	room.Players = append(room.Players, Player{PlayerID: playerID, Connection: conn})
+	player := Player{PlayerID: playerID, Connection: conn}
+	room.Players = append(room.Players, player)
 
-	for {
-		if len(room.Players) != 2 {
-			time.Sleep(time.Second * 2)
-			conn.WriteMessage(websocket.TextMessage, []byte("waiting..."))
-		} else {
-			for _, player := range room.Players {
-				player.Connection.WriteMessage(websocket.TextMessage, []byte("2 Players connected"))
+	// Notify others
+	broadcastRoomStatus(room)
+
+	// Handle read loop (so connection stays alive)
+	go func() {
+		defer func() {
+			removePlayer(room, playerID)
+			conn.Close()
+			broadcastRoomStatus(room)
+		}()
+
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				fmt.Println("Read error:", err)
+				return
 			}
-			return
 		}
-	}
-
+	}()
 }
 
 var rooms map[string]*Room
