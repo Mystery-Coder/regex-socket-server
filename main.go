@@ -37,15 +37,20 @@ type PlayerConnectIdentify struct {
 	PlayerID string
 }
 
-func broadcastRoomStatus(room *Room) {
-	msg := "waiting..."
-	if len(room.Players) == 2 {
-		msg = "2 Players connected"
-	}
+type RoomStatus struct {
+	Status string
+}
+
+type Message[T any] struct {
+	Type string
+	Data T
+}
+
+func broadcastRoom[T any](room *Room, msg Message[T]) {
 
 	for _, p := range room.Players {
 		if p.Connection != nil {
-			p.Connection.WriteMessage(websocket.TextMessage, []byte(msg))
+			p.Connection.WriteJSON(msg)
 		}
 	}
 }
@@ -91,14 +96,23 @@ func wsConnectPlayer(ctx *gin.Context) {
 	room.Players = append(room.Players, player)
 
 	// Notify others
-	broadcastRoomStatus(room)
+	msg := Message[RoomStatus]{Type: "STATUS", Data: RoomStatus{Status: "WAITING"}}
+	if len(room.Players) == 2 {
+		msg = Message[RoomStatus]{Type: "STATUS", Data: RoomStatus{Status: "PLAYER2CONNECTED"}}
+	}
 
-	// Handle read loop (so connection stays alive)
+	broadcastRoom(room, msg)
+
+	// Handle read loop (so connection stays alive, read buffer can get full, must be read)
 	go func() {
 		defer func() {
 			removePlayer(room, playerID)
 			conn.Close()
-			broadcastRoomStatus(room)
+			msg := Message[RoomStatus]{Type: "STATUS", Data: RoomStatus{Status: "WAITING"}}
+			if len(room.Players) == 2 {
+				msg = Message[RoomStatus]{Type: "STATUS", Data: RoomStatus{Status: "PLAYER2CONNECTED"}}
+			}
+			broadcastRoom(room, msg)
 		}()
 
 		for {
