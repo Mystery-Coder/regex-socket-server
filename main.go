@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"net/http"
 	"slices"
 
@@ -128,6 +129,10 @@ func wsConnectPlayer(ctx *gin.Context) {
 var rooms map[string]*Room
 
 func main() {
+
+	var regexQuestions = []string{"\\d{3}-\\w"}
+	var stringQuestions = [][]string{{"aa", "bb", "cc"}}
+
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173"},
@@ -176,6 +181,25 @@ func main() {
 		room.PlayerIDs = append(room.PlayerIDs, playerID)
 
 		ctx.JSON(200, gin.H{"PlayerID": playerID})
+
+	})
+
+	router.GET("/question", func(ctx *gin.Context) {
+		questionType := ctx.Query("type")
+
+		if questionType != "regex" && questionType != "strings" {
+			ctx.JSON(400, gin.H{"error": "InvalidOrMissingType"})
+			return
+		}
+
+		var randomIdx int
+		if questionType == "regex" {
+			randomIdx = rand.Intn(len(regexQuestions))
+			ctx.JSON(200, gin.H{"question": regexQuestions[randomIdx]})
+		} else {
+			randomIdx = rand.Intn(len(stringQuestions))
+			ctx.JSON(200, gin.H{"question": stringQuestions[randomIdx]})
+		}
 
 	})
 
