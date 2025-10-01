@@ -47,6 +47,14 @@ type Message[T any] struct {
 	Data T
 }
 
+type StringQuestion struct {
+	Question []string
+}
+
+type RegexQuestion struct {
+	Question string
+}
+
 func broadcastRoom[T any](room *Room, msg Message[T]) {
 
 	for _, p := range room.Players {
@@ -130,8 +138,10 @@ var rooms map[string]*Room
 
 func main() {
 
-	var regexQuestions = []string{"\\d{3}-\\w"}
-	var stringQuestions = [][]string{{"aa", "bb", "cc"}}
+	regexQuestions := []RegexQuestion{{Question: "\\d{3}\\w"}}
+	// var stringQuestions []StringQuestion
+
+	stringQuestions := []StringQuestion{{Question: []string{"aa", "bb", "cc"}}}
 
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
@@ -195,10 +205,10 @@ func main() {
 		var randomIdx int
 		if questionType == "regex" {
 			randomIdx = rand.Intn(len(regexQuestions))
-			ctx.JSON(200, gin.H{"question": regexQuestions[randomIdx]})
+			ctx.JSON(200, regexQuestions[randomIdx])
 		} else {
 			randomIdx = rand.Intn(len(stringQuestions))
-			ctx.JSON(200, gin.H{"question": stringQuestions[randomIdx]})
+			ctx.JSON(200, stringQuestions[randomIdx])
 		}
 
 	})
