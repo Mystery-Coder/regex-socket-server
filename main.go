@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -38,8 +39,13 @@ type PlayerConnectIdentify struct {
 	PlayerID string
 }
 
-type RoomStatus struct {
+type Status struct {
 	Status string
+}
+
+type PlayerGuess struct { //Can be regex or string
+	PlayerID string
+	Guess    string
 }
 
 type Message[T any] struct {
@@ -105,9 +111,9 @@ func wsConnectPlayer(ctx *gin.Context) {
 	room.Players = append(room.Players, player)
 
 	// Notify others
-	msg := Message[RoomStatus]{Type: "STATUS", Data: RoomStatus{Status: "WAITING"}}
+	msg := Message[Status]{Type: "STATUS", Data: Status{Status: "WAITING"}}
 	if len(room.Players) == 2 {
-		msg = Message[RoomStatus]{Type: "STATUS", Data: RoomStatus{Status: "PLAYER2CONNECTED"}}
+		msg = Message[Status]{Type: "STATUS", Data: Status{Status: "PLAYER2CONNECTED"}}
 	}
 
 	broadcastRoom(room, msg)
@@ -117,19 +123,26 @@ func wsConnectPlayer(ctx *gin.Context) {
 		defer func() {
 			removePlayer(room, playerID)
 			conn.Close()
-			msg := Message[RoomStatus]{Type: "STATUS", Data: RoomStatus{Status: "WAITING"}}
+			msg := Message[Status]{Type: "STATUS", Data: Status{Status: "WAITING"}}
 			if len(room.Players) == 2 {
-				msg = Message[RoomStatus]{Type: "STATUS", Data: RoomStatus{Status: "PLAYER2CONNECTED"}}
+				msg = Message[Status]{Type: "STATUS", Data: Status{Status: "PLAYER2CONNECTED"}}
 			}
 			broadcastRoom(room, msg)
 		}()
 
 		for {
-			_, _, err := conn.ReadMessage()
+			_, msgBytes, err := conn.ReadMessage()
 			if err != nil {
 				fmt.Println("Read error:", err)
 				return
 			}
+			fmt.Println(string(msgBytes))
+			data := strings.Split(string(msgBytes), ":")
+			playerIDFromMsg := data[0]
+			guessFromMsg := data[1]
+
+			var guessMsg = Message[PlayerGuess]{Type: "PLAYERGUESS", Data: PlayerGuess{PlayerID: playerIDFromMsg, Guess: guessFromMsg}}
+			broadcastRoom(room, guessMsg)
 		}
 	}()
 }
