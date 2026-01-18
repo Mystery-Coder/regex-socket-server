@@ -1,11 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"slices"
-	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -24,10 +24,17 @@ type Player struct {
 	Connection *websocket.Conn
 }
 
+type Question struct {
+	QuestionType string
+	Pattern      string
+	Options      []string
+}
+
 type Room struct {
-	RoomID    string
-	Players   []Player
-	PlayerIDs []string
+	RoomID       string
+	Players      []Player
+	PlayerIDs    []string
+	RoomQuestion Question
 }
 
 type RoomIdentify struct {
@@ -39,6 +46,15 @@ type PlayerConnectIdentify struct {
 	PlayerID string
 }
 
+type StringQuestion struct {
+	Question []string
+}
+
+type RegexQuestion struct {
+	Question string
+}
+
+// Message and its types
 type Status struct {
 	Status string
 }
@@ -46,19 +62,12 @@ type Status struct {
 type PlayerGuess struct { //Can be regex or string
 	PlayerID string
 	Guess    string
+	Type     string
 }
 
 type Message[T any] struct {
 	Type string
 	Data T
-}
-
-type StringQuestion struct {
-	Question []string
-}
-
-type RegexQuestion struct {
-	Question string
 }
 
 func broadcastRoom[T any](room *Room, msg Message[T]) {
@@ -110,39 +119,58 @@ func wsConnectPlayer(ctx *gin.Context) {
 	player := Player{PlayerID: playerID, Connection: conn}
 	room.Players = append(room.Players, player)
 
-	// Notify others
-	msg := Message[Status]{Type: "STATUS", Data: Status{Status: "WAITING"}}
-	if len(room.Players) == 2 {
-		msg = Message[Status]{Type: "STATUS", Data: Status{Status: "PLAYER2CONNECTED"}}
-	}
+	// Notify others on first join
+	var status string
+	if len(room.Players) == 1 {
+		status = "WAITING"
+		msg := Message[Status]{Type: "STATUS", Data: Status{Status: status}}
+		broadcastRoom(room, msg)
+	} else if len(room.Players) == 2 {
+		status = "PLAYER2CONNECTED"
+		msg := Message[Status]{Type: "STATUS", Data: Status{Status: status}}
+		broadcastRoom(room, msg)
 
-	broadcastRoom(room, msg)
+		questionMsg := Message[Question]{
+			Type: "QUESTION",
+			Data: room.RoomQuestion,
+		}
+		broadcastRoom(room, questionMsg)
+	}
 
 	// Handle read loop (so connection stays alive, read buffer can get full, must be read)
 	go func() {
 		defer func() {
 			removePlayer(room, playerID)
 			conn.Close()
-			msg := Message[Status]{Type: "STATUS", Data: Status{Status: "WAITING"}}
-			if len(room.Players) == 2 {
-				msg = Message[Status]{Type: "STATUS", Data: Status{Status: "PLAYER2CONNECTED"}}
+			var status string
+			if len(room.Players) == 1 {
+				status = "WAITING"
+			} else if len(room.Players) == 2 {
+				status = "PLAYER2CONNECTED"
 			}
+			msg := Message[Status]{Type: "STATUS", Data: Status{Status: status}}
 			broadcastRoom(room, msg)
 		}()
 
-		for {
+		for { // This is the persistent Read
 			_, msgBytes, err := conn.ReadMessage()
 			if err != nil {
 				fmt.Println("Read error:", err)
 				return
 			}
-			fmt.Println(string(msgBytes))
-			data := strings.Split(string(msgBytes), ":")
-			playerIDFromMsg := data[0]
-			guessFromMsg := data[1]
+			// fmt.Println(string(msgBytes))
 
-			var guessMsg = Message[PlayerGuess]{Type: "PLAYERGUESS", Data: PlayerGuess{PlayerID: playerIDFromMsg, Guess: guessFromMsg}}
-			broadcastRoom(room, guessMsg)
+			var playerGuess PlayerGuess
+			json.Unmarshal(msgBytes, &playerGuess)
+
+			fmt.Println(playerGuess)
+
+			// data := strings.Split(string(msgBytes), ":")
+			// playerIDFromMsg := data[0]
+			// guessFromMsg := data[1]
+
+			// var guessMsg = Message[PlayerGuess]{Type: "PLAYERGUESS", Data: PlayerGuess{PlayerID: playerIDFromMsg, Guess: guessFromMsg}}
+			// broadcastRoom(room, guessMsg)
 		}
 	}()
 }
@@ -151,10 +179,9 @@ var rooms map[string]*Room
 
 func main() {
 
-	regexQuestions := []RegexQuestion{{Question: "\\d{3}\\w"}}
-	// var stringQuestions []StringQuestion
+	regexQuestions := []string{"\\d{3}\\w"}
 
-	stringQuestions := []StringQuestion{{Question: []string{"aa", "bb", "cc"}}}
+	stringQuestions := [][]string{{"aa", "bb", "cc"}}
 
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
@@ -170,9 +197,31 @@ func main() {
 	router.GET("/connect_player", wsConnectPlayer)
 
 	//Create Room, should not be WS
-	router.GET("/create_room", func(ctx *gin.Context) {
+	router.GET("/create_room", func(ctx *gin.Context) { //Takes question_type as query parameter
+		questionType := ctx.Query("question_type")
+
+		if questionType != "regex" && questionType != "strings" {
+			ctx.JSON(400, gin.H{"error": "InvalidOrMissingType"})
+			return
+		}
+
+		var randomIdx int
+		var roomQuestion Question
+		if questionType == "regex" {
+			randomIdx = rand.Intn(len(regexQuestions))
+
+			roomQuestion.QuestionType = "regex"
+			roomQuestion.Pattern = regexQuestions[randomIdx] //\\d{3}\\w
+		} else {
+			randomIdx = rand.Intn(len(stringQuestions))
+			strings_q := stringQuestions[randomIdx] // {"aa", "bb", "cc"}
+
+			roomQuestion.QuestionType = "strings"
+			roomQuestion.Options = strings_q
+		}
+
 		newRoomID := uuid.NewString()
-		rooms[newRoomID] = &Room{RoomID: newRoomID}
+		rooms[newRoomID] = &Room{RoomID: newRoomID, RoomQuestion: roomQuestion}
 		fmt.Println(rooms)
 		ctx.JSON(200, gin.H{"RoomID": newRoomID})
 	})
@@ -207,24 +256,24 @@ func main() {
 
 	})
 
-	router.GET("/question", func(ctx *gin.Context) {
-		questionType := ctx.Query("type")
+	// router.GET("/question", func(ctx *gin.Context) {
+	// 	questionType := ctx.Query("type")
 
-		if questionType != "regex" && questionType != "strings" {
-			ctx.JSON(400, gin.H{"error": "InvalidOrMissingType"})
-			return
-		}
+	// 	if questionType != "regex" && questionType != "strings" {
+	// 		ctx.JSON(400, gin.H{"error": "InvalidOrMissingType"})
+	// 		return
+	// 	}
 
-		var randomIdx int
-		if questionType == "regex" {
-			randomIdx = rand.Intn(len(regexQuestions))
-			ctx.JSON(200, regexQuestions[randomIdx])
-		} else {
-			randomIdx = rand.Intn(len(stringQuestions))
-			ctx.JSON(200, stringQuestions[randomIdx])
-		}
+	// 	var randomIdx int
+	// 	if questionType == "regex" {
+	// 		randomIdx = rand.Intn(len(regexQuestions))
+	// 		ctx.JSON(200, regexQuestions[randomIdx])
+	// 	} else {
+	// 		randomIdx = rand.Intn(len(stringQuestions))
+	// 		ctx.JSON(200, stringQuestions[randomIdx])
+	// 	}
 
-	})
+	// })
 
 	router.Run(":8080")
 }
