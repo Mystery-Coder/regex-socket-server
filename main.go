@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"regexp"
 	"slices"
 
 	"github.com/gin-contrib/cors"
@@ -17,57 +18,6 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin:     func(r *http.Request) bool { return true }, // Allow all origins
-}
-
-type Player struct {
-	PlayerID   string
-	Connection *websocket.Conn
-}
-
-type Question struct {
-	QuestionType string
-	Pattern      string
-	Options      []string
-}
-
-type Room struct {
-	RoomID       string
-	Players      []Player
-	PlayerIDs    []string
-	RoomQuestion Question
-}
-
-type RoomIdentify struct {
-	RoomID string
-}
-
-type PlayerConnectIdentify struct {
-	RoomID   string
-	PlayerID string
-}
-
-type StringQuestion struct {
-	Question []string
-}
-
-type RegexQuestion struct {
-	Question string
-}
-
-// Message and its types
-type Status struct {
-	Status string
-}
-
-type PlayerGuess struct { //Can be regex or string
-	PlayerID string
-	Guess    string
-	Type     string
-}
-
-type Message[T any] struct {
-	Type string
-	Data T
 }
 
 func broadcastRoom[T any](room *Room, msg Message[T]) {
@@ -163,14 +113,39 @@ func wsConnectPlayer(ctx *gin.Context) {
 			var playerGuess PlayerGuess
 			json.Unmarshal(msgBytes, &playerGuess)
 
-			fmt.Println(playerGuess)
+			// fmt.Println(playerGuess)
 
-			// data := strings.Split(string(msgBytes), ":")
-			// playerIDFromMsg := data[0]
-			// guessFromMsg := data[1]
+			//Checking the guess
+			switch room.RoomQuestion.QuestionType {
+			case "strings":
+				{
+					if playerGuess.Type == "regex" {
+						regex, err := regexp.Compile(playerGuess.Guess)
 
-			// var guessMsg = Message[PlayerGuess]{Type: "PLAYERGUESS", Data: PlayerGuess{PlayerID: playerIDFromMsg, Guess: guessFromMsg}}
-			// broadcastRoom(room, guessMsg)
+						if err != nil {
+							fmt.Println("Error compiling regex", err)
+						}
+
+						allStringsMatch := true
+						for i := range len(room.RoomQuestion.Options) {
+							match := regex.MatchString(room.RoomQuestion.Options[i])
+
+							if !match {
+								allStringsMatch = false
+								break
+							}
+
+						}
+						fmt.Println(allStringsMatch)
+					}
+				}
+			case "regex":
+				{
+
+				}
+			}
+
+			broadcastRoom(room, Message[PlayerGuess]{Type: "PLAYERGUESS", Data: playerGuess})
 		}
 	}()
 }
@@ -255,25 +230,6 @@ func main() {
 		ctx.JSON(200, gin.H{"PlayerID": playerID})
 
 	})
-
-	// router.GET("/question", func(ctx *gin.Context) {
-	// 	questionType := ctx.Query("type")
-
-	// 	if questionType != "regex" && questionType != "strings" {
-	// 		ctx.JSON(400, gin.H{"error": "InvalidOrMissingType"})
-	// 		return
-	// 	}
-
-	// 	var randomIdx int
-	// 	if questionType == "regex" {
-	// 		randomIdx = rand.Intn(len(regexQuestions))
-	// 		ctx.JSON(200, regexQuestions[randomIdx])
-	// 	} else {
-	// 		randomIdx = rand.Intn(len(stringQuestions))
-	// 		ctx.JSON(200, stringQuestions[randomIdx])
-	// 	}
-
-	// })
 
 	router.Run(":8080")
 }
