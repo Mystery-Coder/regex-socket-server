@@ -49,6 +49,6 @@ type Question struct {
 }
 
 type Message[T any] struct {
-	Type string
+	Type string //Can be "STATUS" or "QUESTION" or "PLAYERGUESS" or "WINNINGGUESS"
 	Data T
 }

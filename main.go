@@ -137,6 +137,8 @@ func wsConnectPlayer(ctx *gin.Context) {
 
 						}
 						fmt.Println(allStringsMatch)
+
+						broadcastRoom(room, Message[PlayerGuess]{Type: "WINNIGGUESS", Data: playerGuess})
 					}
 				}
 			case "regex":
