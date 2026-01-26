@@ -88,6 +88,7 @@ func wsConnectPlayer(ctx *gin.Context) {
 	}
 
 	// Handle read loop (so connection stays alive, read buffer can get full, must be read)
+	// Making a lightweight go-routine thread for each WS connection
 	go func() {
 		defer func() {
 			removePlayer(room, playerID)
@@ -127,8 +128,8 @@ func wsConnectPlayer(ctx *gin.Context) {
 						}
 
 						allStringsMatch := true
-						for i := range len(room.RoomQuestion.Options) {
-							match := regex.MatchString(room.RoomQuestion.Options[i])
+						for _, option := range room.RoomQuestion.Options {
+							match := regex.MatchString(option)
 
 							if !match {
 								allStringsMatch = false
@@ -136,9 +137,10 @@ func wsConnectPlayer(ctx *gin.Context) {
 							}
 
 						}
-						fmt.Println(allStringsMatch)
 
-						broadcastRoom(room, Message[PlayerGuess]{Type: "WINNIGGUESS", Data: playerGuess})
+						if allStringsMatch {
+							broadcastRoom(room, Message[PlayerGuess]{Type: "WINNIGGUESS", Data: playerGuess})
+						}
 					}
 				}
 			case "regex":
@@ -173,7 +175,6 @@ func main() {
 
 	router.GET("/connect_player", wsConnectPlayer)
 
-	//Create Room, should not be WS
 	router.GET("/create_room", func(ctx *gin.Context) { //Takes question_type as query parameter
 		questionType := ctx.Query("question_type")
 
@@ -208,7 +209,7 @@ func main() {
 		var roomIdentify RoomIdentify
 		if err := ctx.BindJSON(&roomIdentify); err != nil {
 			fmt.Println("Binding err", err)
-			ctx.JSON(500, gin.H{"error": "BindError"})
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "BindError"})
 			return
 		}
 
@@ -216,7 +217,7 @@ func main() {
 
 		if !exists {
 			fmt.Println("Invalid RoomID")
-			ctx.JSON(400, gin.H{"error": "InvalidRoomIDError"})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "InvalidRoomIDError"})
 			return
 		}
 		playerID := uuid.NewString()
@@ -224,12 +225,12 @@ func main() {
 		noOfPlayers := len(room.PlayerIDs)
 		if noOfPlayers == 2 {
 			fmt.Println("Room Full")
-			ctx.JSON(400, gin.H{"error": "RoomFullError"})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "RoomFullError"})
 			return
 		}
 		room.PlayerIDs = append(room.PlayerIDs, playerID)
 
-		ctx.JSON(200, gin.H{"PlayerID": playerID})
+		ctx.JSON(http.StatusOK, gin.H{"PlayerID": playerID})
 
 	})
 
