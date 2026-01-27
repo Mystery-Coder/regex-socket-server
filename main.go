@@ -121,7 +121,8 @@ func wsConnectPlayer(ctx *gin.Context) {
 			case "strings":
 				{
 					if playerGuess.Type == "regex" {
-						regex, err := regexp.Compile(playerGuess.Guess)
+						regexStr := "^" + playerGuess.Guess + "$" // Ensure Full String Match
+						regex, err := regexp.Compile(regexStr)
 
 						if err != nil {
 							fmt.Println("Error compiling regex", err)
