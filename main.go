@@ -146,7 +146,20 @@ func wsConnectPlayer(ctx *gin.Context) {
 				}
 			case "regex":
 				{
+					if playerGuess.Type == "string" {
+						q := room.RoomQuestion.Pattern
 
+						regex, err := regexp.Compile(q)
+
+						if err != nil {
+							fmt.Println("Error compiling regex", err)
+						}
+						guess := playerGuess.Guess
+
+						if regex.MatchString(guess) {
+							broadcastRoom(room, Message[PlayerGuess]{Type: "WINNIGGUESS", Data: playerGuess})
+						}
+					}
 				}
 			}
 
@@ -176,7 +189,7 @@ func main() {
 
 	router.GET("/connect_player", wsConnectPlayer)
 
-	router.GET("/create_room", func(ctx *gin.Context) { //Takes question_type as query parameter
+	router.GET("/create_room", func(ctx *gin.Context) { //Takes question_type as query parameter, "regex" or "strings"
 		questionType := ctx.Query("question_type")
 
 		if questionType != "regex" && questionType != "strings" {

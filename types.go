@@ -39,7 +39,7 @@ type Status struct {
 type PlayerGuess struct { //Can be regex or string
 	PlayerID string
 	Guess    string
-	Type     string
+	Type     string // if Type is string it is for a regex question and vice versa
 }
 
 type Question struct {
