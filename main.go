@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"sync"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -21,8 +22,12 @@ var upgrader = websocket.Upgrader{
 }
 
 func broadcastRoom[T any](room *Room, msg Message[T]) {
+	room.mu.RLock() // read lock and copy to not block writers
+	players := make([]Player, len(room.Players))
+	copy(players, room.Players)
+	room.mu.RUnlock()
 
-	for _, p := range room.Players {
+	for _, p := range players {
 		if p.Connection != nil {
 			p.Connection.WriteJSON(msg)
 		}
@@ -30,6 +35,10 @@ func broadcastRoom[T any](room *Room, msg Message[T]) {
 }
 
 func removePlayer(room *Room, playerID string) {
+
+	room.mu.Lock()         // Write lock the room
+	defer room.mu.Unlock() // immediately defer room unlock
+
 	newPlayers := []Player{}
 	for _, p := range room.Players {
 		if p.PlayerID != playerID {
@@ -48,13 +57,20 @@ func wsConnectPlayer(ctx *gin.Context) {
 		return
 	}
 
+	globalRoomsMu.RLock()
 	room, exists := rooms[roomID]
+	globalRoomsMu.RUnlock()
+
 	if !exists {
 		ctx.JSON(400, gin.H{"error": "InvalidRoomID"})
 		return
 	}
 
-	if !slices.Contains(room.PlayerIDs, playerID) {
+	room.mu.RLock()
+	hasPlayer := slices.Contains(room.PlayerIDs, playerID)
+	room.mu.RUnlock()
+
+	if !hasPlayer {
 		ctx.JSON(400, gin.H{"error": "PlayerNotAdded"})
 		return
 	}
@@ -67,15 +83,20 @@ func wsConnectPlayer(ctx *gin.Context) {
 	}
 
 	player := Player{PlayerID: playerID, Connection: conn}
+	room.mu.Lock()
 	room.Players = append(room.Players, player)
+	playerCount := len(room.Players)
+	room.mu.Unlock()
 
 	// Notify others on first join
 	var status string
-	if len(room.Players) == 1 {
+	switch playerCount {
+
+	case 1:
 		status = "WAITING"
 		msg := Message[Status]{Type: "STATUS", Data: Status{Status: status}}
 		broadcastRoom(room, msg)
-	} else if len(room.Players) == 2 {
+	case 2:
 		status = "PLAYER2CONNECTED"
 		msg := Message[Status]{Type: "STATUS", Data: Status{Status: status}}
 		broadcastRoom(room, msg)
@@ -93,10 +114,16 @@ func wsConnectPlayer(ctx *gin.Context) {
 		defer func() {
 			removePlayer(room, playerID)
 			conn.Close()
+
+			room.mu.RLock()
+			count := len(room.Players)
+			room.mu.RUnlock()
+
 			var status string
-			if len(room.Players) == 1 {
+			switch count {
+			case 1:
 				status = "WAITING"
-			} else if len(room.Players) == 2 {
+			case 2:
 				status = "PLAYER2CONNECTED"
 			}
 			msg := Message[Status]{Type: "STATUS", Data: Status{Status: status}}
@@ -126,6 +153,7 @@ func wsConnectPlayer(ctx *gin.Context) {
 
 						if err != nil {
 							fmt.Println("Error compiling regex", err)
+							break
 						}
 
 						allStringsMatch := true
@@ -153,6 +181,7 @@ func wsConnectPlayer(ctx *gin.Context) {
 
 						if err != nil {
 							fmt.Println("Error compiling regex", err)
+							break
 						}
 						guess := playerGuess.Guess
 
@@ -168,7 +197,10 @@ func wsConnectPlayer(ctx *gin.Context) {
 	}()
 }
 
-var rooms map[string]*Room
+var (
+	rooms         map[string]*Room
+	globalRoomsMu sync.RWMutex
+)
 
 func main() {
 
@@ -209,8 +241,12 @@ func main() {
 		}
 
 		newRoomID := uuid.NewString()
+
+		globalRoomsMu.Lock()
 		rooms[newRoomID] = &Room{RoomID: newRoomID, RoomQuestion: roomQuestion}
-		fmt.Println(rooms)
+		globalRoomsMu.Unlock()
+
+		// fmt.Println(rooms)
 		ctx.JSON(200, gin.H{"RoomID": newRoomID})
 	})
 
@@ -223,7 +259,9 @@ func main() {
 			return
 		}
 
+		globalRoomsMu.RLock()
 		room, exists := rooms[roomIdentify.RoomID]
+		globalRoomsMu.RUnlock()
 
 		if !exists {
 			fmt.Println("Invalid RoomID")
@@ -232,13 +270,17 @@ func main() {
 		}
 		playerID := uuid.NewString()
 
+		room.mu.Lock()
 		noOfPlayers := len(room.PlayerIDs)
 		if noOfPlayers == 2 {
 			fmt.Println("Room Full")
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "RoomFullError"})
+			room.mu.Unlock()
+
 			return
 		}
 		room.PlayerIDs = append(room.PlayerIDs, playerID)
+		room.mu.Unlock()
 
 		ctx.JSON(http.StatusOK, gin.H{"PlayerID": playerID})
 

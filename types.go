@@ -1,6 +1,10 @@
 package main
 
-import "github.com/gorilla/websocket"
+import (
+	"sync"
+
+	"github.com/gorilla/websocket"
+)
 
 type Player struct {
 	PlayerID   string
@@ -8,6 +12,7 @@ type Player struct {
 }
 
 type Room struct {
+	mu           sync.RWMutex
 	RoomID       string
 	Players      []Player
 	PlayerIDs    []string
