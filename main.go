@@ -172,10 +172,6 @@ var rooms map[string]*Room
 
 func main() {
 
-	regexQuestions := []string{"\\d{3}\\w"}
-
-	stringQuestions := [][]string{{"aa", "bb", "cc"}}
-
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173"},
