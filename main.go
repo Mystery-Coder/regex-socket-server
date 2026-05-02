@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"os"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/gin-contrib/cors"
@@ -203,10 +205,27 @@ var (
 )
 
 func main() {
+	if strings.EqualFold(os.Getenv("GIN_MODE"), "release") {
+		gin.SetMode(gin.ReleaseMode)
+	}
 
 	router := gin.Default()
+	if err := router.SetTrustedProxies(nil); err != nil {
+		fmt.Println("SetTrustedProxies error:", err)
+	}
+
+	allowedOrigins := []string{"http://localhost:5173"}
+	if originsEnv := strings.TrimSpace(os.Getenv("CORS_ALLOW_ORIGINS")); originsEnv != "" {
+		parts := strings.Split(originsEnv, ",")
+		allowedOrigins = allowedOrigins[:0]
+		for _, p := range parts {
+			if origin := strings.TrimSpace(p); origin != "" {
+				allowedOrigins = append(allowedOrigins, origin)
+			}
+		}
+	}
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowOrigins:     allowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
