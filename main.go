@@ -217,7 +217,6 @@ func main() {
 	allowedOrigins := []string{"http://localhost:5173"}
 	if originsEnv := strings.TrimSpace(os.Getenv("CORS_ALLOW_ORIGINS")); originsEnv != "" {
 		parts := strings.Split(originsEnv, ",")
-		allowedOrigins = allowedOrigins[:0]
 		for _, p := range parts {
 			if origin := strings.TrimSpace(p); origin != "" {
 				allowedOrigins = append(allowedOrigins, origin)
